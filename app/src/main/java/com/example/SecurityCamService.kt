@@ -25,7 +25,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import android.content.ContentValues
+import android.provider.MediaStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -44,8 +47,8 @@ class SecurityCamService : Service(), LifecycleOwner {
         const val ACTION_STOP = "com.example.ACTION_STOP"
         const val CHANNEL_ID = "security_cam_channel"
         const val NOTIFICATION_ID = 1
-        var isRunning = false
-        var captureCount = 0
+        val isRunning = MutableStateFlow(false)
+        val captureCount = MutableStateFlow(0)
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -74,9 +77,9 @@ class SecurityCamService : Service(), LifecycleOwner {
             return START_NOT_STICKY
         }
 
-        if (!isRunning) {
-            isRunning = true
-            captureCount = 0
+        if (!isRunning.value) {
+            isRunning.value = true
+            captureCount.value = 0
             startTime = System.currentTimeMillis()
             
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -121,7 +124,7 @@ class SecurityCamService : Service(), LifecycleOwner {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Security Camera Active")
-            .setContentText("Captures: $captureCount | Uptime: $timeStr")
+            .setContentText("Captures: ${captureCount.value} | Uptime: $timeStr")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentIntent(mainPendingIntent)
             .addAction(0, "Stop", stopPendingIntent)
@@ -141,7 +144,7 @@ class SecurityCamService : Service(), LifecycleOwner {
 
     private fun startNotificationUpdater() {
         CoroutineScope(Dispatchers.Main).launch {
-            while (isRunning) {
+            while (isRunning.value) {
                 delay(1000)
                 val manager = getSystemService(NotificationManager::class.java)
                 manager.notify(NOTIFICATION_ID, createNotification())
@@ -161,7 +164,7 @@ class SecurityCamService : Service(), LifecycleOwner {
                 Log.e("SecurityCam", "Camera initialization failed", e)
                 CoroutineScope(Dispatchers.Main).launch {
                     delay(5000)
-                    if (isRunning) startCameraPipeline()
+                    if (isRunning.value) startCameraPipeline()
                 }
             }
         }, ContextCompat.getMainExecutor(this))
@@ -215,7 +218,7 @@ class SecurityCamService : Service(), LifecycleOwner {
     private fun startContinuousCapture(intervalSeconds: Int) {
         captureJob?.cancel()
         captureJob = CoroutineScope(Dispatchers.IO).launch {
-            while (isRunning && isActive) {
+            while (isRunning.value && isActive) {
                 takePhoto()
                 delay(intervalSeconds * 1000L)
             }
@@ -224,7 +227,7 @@ class SecurityCamService : Service(), LifecycleOwner {
 
     private var lastCaptureTime = 0L
     private fun takePhoto() {
-        if (!isRunning) return
+        if (!isRunning.value) return
         
         val now = System.currentTimeMillis()
         if (now - lastCaptureTime < 2000L) return
@@ -233,18 +236,26 @@ class SecurityCamService : Service(), LifecycleOwner {
         val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val timeStr = SimpleDateFormat("HH-mm-ss", Locale.US).format(Date())
         
-        val dir = File(getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "SecurityCam/$dateStr")
-        if (!dir.exists()) dir.mkdirs()
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "IMG_$timeStr.jpg")
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/SecurityCam/$dateStr")
+            }
+        }
         
-        val file = File(dir, "IMG_$timeStr.jpg")
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(file).build()
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(
+            contentResolver,
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            contentValues
+        ).build()
 
         capture.takePicture(
             outputOptions,
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    captureCount++
+                    captureCount.value++
                     lastCaptureTime = System.currentTimeMillis()
                 }
 
@@ -259,19 +270,30 @@ class SecurityCamService : Service(), LifecycleOwner {
         CoroutineScope(Dispatchers.IO).launch {
             val retentionDays = settingsRepo.retentionDays.first()
             val cutoff = System.currentTimeMillis() - (retentionDays * 24 * 60 * 60 * 1000L)
-            val baseDir = File(getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "SecurityCam")
             
-            if (baseDir.exists()) {
-                baseDir.listFiles()?.forEach { dateDir ->
-                    if (dateDir.isDirectory) {
-                        try {
-                            val dateStr = dateDir.name
-                            val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateStr)
-                            if (date != null && date.time < cutoff) {
-                                dateDir.deleteRecursively()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    val selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Images.Media.DATE_ADDED} < ?"
+                    val selectionArgs = arrayOf("%SecurityCam%", (cutoff / 1000).toString())
+                    contentResolver.delete(uri, selection, selectionArgs)
+                } catch (e: Exception) {
+                    Log.e("SecurityCam", "MediaStore cleanup failed", e)
+                }
+            } else {
+                val baseDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "SecurityCam")
+                if (baseDir.exists()) {
+                    baseDir.listFiles()?.forEach { dateDir ->
+                        if (dateDir.isDirectory) {
+                            try {
+                                val dateStr = dateDir.name
+                                val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateStr)
+                                if (date != null && date.time < cutoff) {
+                                    dateDir.deleteRecursively()
+                                }
+                            } catch (e: Exception) {
+                                Log.e("SecurityCam", "Cleanup parse error", e)
                             }
-                        } catch (e: Exception) {
-                            Log.e("SecurityCam", "Cleanup parse error", e)
                         }
                     }
                 }
@@ -280,7 +302,7 @@ class SecurityCamService : Service(), LifecycleOwner {
     }
 
     override fun onDestroy() {
-        isRunning = false
+        isRunning.value = false
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)

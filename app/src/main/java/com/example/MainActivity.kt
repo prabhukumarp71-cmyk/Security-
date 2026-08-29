@@ -70,6 +70,9 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
     val retentionDays by settingsRepo.retentionDays.collectAsStateWithLifecycle(initialValue = 7)
     val motionThreshold by settingsRepo.motionThreshold.collectAsStateWithLifecycle(initialValue = 20)
     
+    val isRunning by SecurityCamService.isRunning.collectAsStateWithLifecycle()
+    val captureCount by SecurityCamService.captureCount.collectAsStateWithLifecycle()
+    
     var showPreview by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -169,10 +172,10 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Status: ${if (SecurityCamService.isRunning) "Running" else "Stopped"}")
+                        Text("Status: ${if (isRunning) "Running" else "Stopped"}")
                         Button(
                             onClick = {
-                                if (SecurityCamService.isRunning) {
+                                if (isRunning) {
                                     context.startService(Intent(context, SecurityCamService::class.java).apply { action = SecurityCamService.ACTION_STOP })
                                 } else {
                                     context.startForegroundService(Intent(context, SecurityCamService::class.java))
@@ -180,16 +183,16 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                             }
                         ) {
                             Icon(
-                                if (SecurityCamService.isRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
                                 contentDescription = null
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(if (SecurityCamService.isRunning) "Stop" else "Start")
+                            Text(if (isRunning) "Stop" else "Start")
                         }
                     }
-                    if (SecurityCamService.isRunning) {
+                    if (isRunning) {
                         Spacer(Modifier.height(8.dp))
-                        Text("Session Captures: ${SecurityCamService.captureCount}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Session Captures: $captureCount", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
