@@ -17,6 +17,9 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import android.graphics.SurfaceTexture
+import android.view.Surface
 import androidx.camera.camera2.interop.Camera2Interop
 import android.hardware.camera2.CaptureRequest
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -199,6 +202,20 @@ class SecurityCamService : Service(), LifecycleOwner {
 
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
         val useCases = mutableListOf<androidx.camera.core.UseCase>(imageCapture!!)
+
+        // Add a dummy Preview surface to force the camera hardware ISP to run Auto-Exposure (AE) 
+        // and Auto-White Balance (AWB) continuously, otherwise photos come out pitch black in the background.
+        val preview = Preview.Builder().build()
+        preview.setSurfaceProvider { request ->
+            val surfaceTexture = SurfaceTexture(0)
+            surfaceTexture.setDefaultBufferSize(request.resolution.width, request.resolution.height)
+            val surface = Surface(surfaceTexture)
+            request.provideSurface(surface, ContextCompat.getMainExecutor(this)) {
+                surface.release()
+                surfaceTexture.release()
+            }
+        }
+        useCases.add(preview)
 
         val analysisBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER)).build())
