@@ -56,7 +56,7 @@ class SecurityCamService : Service(), LifecycleOwner {
     
     companion object {
         const val ACTION_STOP = "com.example.ACTION_STOP"
-        const val CHANNEL_ID = "security_cam_channel"
+        const val CHANNEL_ID = "security_cam_channel_v2"
         const val NOTIFICATION_ID = 1
         val isRunning = MutableStateFlow(false)
         val captureCount = MutableStateFlow(0)
@@ -104,7 +104,6 @@ class SecurityCamService : Service(), LifecycleOwner {
             
             acquireWakeLock()
             startCameraPipeline()
-            startNotificationUpdater()
             cleanUpOldPhotos()
         }
 
@@ -127,19 +126,15 @@ class SecurityCamService : Service(), LifecycleOwner {
         val mainIntent = Intent(this, MainActivity::class.java)
         val mainPendingIntent = PendingIntent.getActivity(this, 0, mainIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        val elapsed = (System.currentTimeMillis() - startTime) / 1000
-        val hours = elapsed / 3600
-        val minutes = (elapsed % 3600) / 60
-        val seconds = elapsed % 60
-        val timeStr = String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Security Camera Active")
-            .setContentText("Captures: ${captureCount.value} | Uptime: $timeStr")
+            .setContentText("Captures: ${captureCount.value}")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentIntent(mainPendingIntent)
             .addAction(0, "Stop", stopPendingIntent)
-            .setOngoing(true)
+            .setUsesChronometer(true)
+            .setWhen(startTime)
+            .setOngoing(false)
             .build()
     }
 
@@ -147,20 +142,10 @@ class SecurityCamService : Service(), LifecycleOwner {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Security Camera Service",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_MIN
         )
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(channel)
-    }
-
-    private fun startNotificationUpdater() {
-        CoroutineScope(Dispatchers.Main).launch {
-            while (isRunning.value) {
-                delay(1000)
-                val manager = getSystemService(NotificationManager::class.java)
-                manager.notify(NOTIFICATION_ID, createNotification())
-            }
-        }
     }
 
     private fun startCameraPipeline() {
@@ -326,6 +311,12 @@ class SecurityCamService : Service(), LifecycleOwner {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     captureCount.value++
                     lastCaptureTime = System.currentTimeMillis()
+                    
+                    val manager = getSystemService(NotificationManager::class.java)
+                    val isNotificationActive = manager.activeNotifications.any { it.id == NOTIFICATION_ID }
+                    if (isNotificationActive) {
+                        manager.notify(NOTIFICATION_ID, createNotification())
+                    }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
