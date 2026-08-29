@@ -18,6 +18,7 @@ class SettingsRepository(private val context: Context) {
         val AUTO_RESTART = booleanPreferencesKey("auto_restart")
         val MOTION_THRESHOLD = intPreferencesKey("motion_threshold")
         val IS_ENHANCED_MODE = booleanPreferencesKey("is_enhanced_mode")
+        val IS_HDR_MODE = booleanPreferencesKey("is_hdr_mode")
         val ASPECT_RATIO = intPreferencesKey("aspect_ratio")
     }
 
@@ -27,6 +28,7 @@ class SettingsRepository(private val context: Context) {
     val autoRestart: Flow<Boolean> = context.dataStore.data.map { it[AUTO_RESTART] ?: false }
     val motionThreshold: Flow<Int> = context.dataStore.data.map { it[MOTION_THRESHOLD] ?: 20 }
     val isEnhancedMode: Flow<Boolean> = context.dataStore.data.map { it[IS_ENHANCED_MODE] ?: true }
+    val isHdrMode: Flow<Boolean> = context.dataStore.data.map { it[IS_HDR_MODE] ?: true }
     val aspectRatio: Flow<Int> = context.dataStore.data.map { it[ASPECT_RATIO] ?: 0 } // 0 for 4:3, 1 for 16:9
 
     suspend fun setMode(isContinuous: Boolean) {
@@ -51,6 +53,10 @@ class SettingsRepository(private val context: Context) {
     
     suspend fun setEnhancedMode(isEnhanced: Boolean) {
         context.dataStore.edit { it[IS_ENHANCED_MODE] = isEnhanced }
+    }
+    
+    suspend fun setHdrMode(isHdr: Boolean) {
+        context.dataStore.edit { it[IS_HDR_MODE] = isHdr }
     }
     
     suspend fun setAspectRatio(ratio: Int) {

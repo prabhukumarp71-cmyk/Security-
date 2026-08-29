@@ -70,6 +70,7 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
     val retentionDays by settingsRepo.retentionDays.collectAsStateWithLifecycle(initialValue = 7)
     val motionThreshold by settingsRepo.motionThreshold.collectAsStateWithLifecycle(initialValue = 20)
     val isEnhancedMode by settingsRepo.isEnhancedMode.collectAsStateWithLifecycle(initialValue = true)
+    val isHdrMode by settingsRepo.isHdrMode.collectAsStateWithLifecycle(initialValue = true)
     val aspectRatio by settingsRepo.aspectRatio.collectAsStateWithLifecycle(initialValue = 0)
     
     val isRunning by SecurityCamService.isRunning.collectAsStateWithLifecycle()
@@ -258,6 +259,21 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                 Switch(
                     checked = isEnhancedMode,
                     onCheckedChange = { coroutineScope.launch { settingsRepo.setEnhancedMode(it) } }
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("HDR Mode", style = MaterialTheme.typography.bodyLarge)
+                    Text(if (isHdrMode) "High Dynamic Range ON" else "Standard Dynamic Range", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = isHdrMode,
+                    onCheckedChange = { coroutineScope.launch { settingsRepo.setHdrMode(it) } }
                 )
             }
 
