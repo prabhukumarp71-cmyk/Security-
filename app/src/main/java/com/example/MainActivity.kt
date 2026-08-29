@@ -69,6 +69,8 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
     val interval by settingsRepo.interval.collectAsStateWithLifecycle(initialValue = 5)
     val retentionDays by settingsRepo.retentionDays.collectAsStateWithLifecycle(initialValue = 7)
     val motionThreshold by settingsRepo.motionThreshold.collectAsStateWithLifecycle(initialValue = 20)
+    val isEnhancedMode by settingsRepo.isEnhancedMode.collectAsStateWithLifecycle(initialValue = true)
+    val aspectRatio by settingsRepo.aspectRatio.collectAsStateWithLifecycle(initialValue = 0)
     
     val isRunning by SecurityCamService.isRunning.collectAsStateWithLifecycle()
     val captureCount by SecurityCamService.captureCount.collectAsStateWithLifecycle()
@@ -242,6 +244,40 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                     valueRange = 1f..30f,
                     steps = 29
                 )
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Image Style", style = MaterialTheme.typography.bodyLarge)
+                    Text(if (isEnhancedMode) "Enhanced (Moto Processing)" else "Natural (No AI)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = isEnhancedMode,
+                    onCheckedChange = { coroutineScope.launch { settingsRepo.setEnhancedMode(it) } }
+                )
+            }
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Aspect Ratio", style = MaterialTheme.typography.bodyLarge)
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = aspectRatio == 0,
+                        onClick = { coroutineScope.launch { settingsRepo.setAspectRatio(0) } },
+                        label = { Text("4:3") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = aspectRatio == 1,
+                        onClick = { coroutineScope.launch { settingsRepo.setAspectRatio(1) } },
+                        label = { Text("16:9") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
             Row(
