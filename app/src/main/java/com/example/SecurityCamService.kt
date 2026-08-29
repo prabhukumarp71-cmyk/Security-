@@ -189,9 +189,6 @@ class SecurityCamService : Service(), LifecycleOwner {
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
 
         val ext = Camera2Interop.Extender(imageCaptureBuilder)
-        ext.setCaptureRequestOption(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-        ext.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-        ext.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
         ext.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
         ext.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
         ext.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
@@ -214,6 +211,11 @@ class SecurityCamService : Service(), LifecycleOwner {
                 takePhoto() 
             }
             imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer)
+        } else {
+            // Dummy analyzer to keep the camera stream active for AE/AWB
+            imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { image -> 
+                image.close() 
+            }
         }
         useCases.add(imageAnalysis)
 
