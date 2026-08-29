@@ -88,18 +88,15 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                 ),
                 actions = {
                     IconButton(onClick = {
-                        val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "SecurityCam")
-                        val uri = androidx.core.content.FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.provider", // Needs provider in manifest if we want to share
-                            dir
-                        )
-                        // Simple fallback since Directory browsing is tricky:
-                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                            type = "image/*"
-                            addCategory(Intent.CATEGORY_OPENABLE)
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                type = "image/*"
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(Intent.createChooser(intent, "View Photos"))
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
-                        context.startActivity(Intent.createChooser(intent, "View Photos"))
                     }) {
                         Icon(Icons.Default.PhotoLibrary, contentDescription = "Gallery")
                     }
