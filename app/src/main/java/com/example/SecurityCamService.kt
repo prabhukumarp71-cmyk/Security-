@@ -187,7 +187,7 @@ class SecurityCamService : Service(), LifecycleOwner {
 
         val imageCaptureBuilder = ImageCapture.Builder()
             .setResolutionSelector(resolutionSelector)
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
 
         imageCapture = imageCaptureBuilder.build()
 
