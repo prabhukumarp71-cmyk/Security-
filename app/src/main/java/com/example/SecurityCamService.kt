@@ -207,8 +207,12 @@ class SecurityCamService : Service(), LifecycleOwner {
             
             if (isHdrMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
                 cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.HDR)
-            } else if (isEnhancedMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.AUTO)) {
-                cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.AUTO)
+            } else if (isEnhancedMode) {
+                if (extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.NIGHT)) {
+                    cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.NIGHT)
+                } else if (extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.AUTO)) {
+                    cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.AUTO)
+                }
             }
         }
 
