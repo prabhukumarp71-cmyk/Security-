@@ -187,7 +187,7 @@ class SecurityCamService : Service(), LifecycleOwner {
 
         val imageCaptureBuilder = ImageCapture.Builder()
             .setResolutionSelector(resolutionSelector)
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(if (isHdrMode || isEnhancedMode) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
 
         imageCapture = imageCaptureBuilder.build()
 
@@ -261,6 +261,8 @@ class SecurityCamService : Service(), LifecycleOwner {
     private fun startContinuousCapture(intervalSeconds: Int) {
         captureJob?.cancel()
         captureJob = CoroutineScope(Dispatchers.IO).launch {
+            // Give the camera ISP a couple of seconds to settle AE/AWB before the first shot
+            delay(2000L)
             while (isRunning.value && isActive) {
                 takePhoto()
                 delay(intervalSeconds * 1000L)
