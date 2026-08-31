@@ -192,6 +192,7 @@ class SecurityCamService : Service(), LifecycleOwner {
         imageCapture = imageCaptureBuilder.build()
 
         var cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+        var extensionActive = false
         
         if (isEnhancedMode || isHdrMode) {
             val extensionsManager = suspendCoroutine<ExtensionsManager> { continuation ->
@@ -207,11 +208,14 @@ class SecurityCamService : Service(), LifecycleOwner {
             
             if (isHdrMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
                 cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.HDR)
+                extensionActive = true
             } else if (isEnhancedMode) {
                 if (extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.NIGHT)) {
                     cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.NIGHT)
+                    extensionActive = true
                 } else if (extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.AUTO)) {
                     cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.AUTO)
+                    extensionActive = true
                 }
             }
         }
@@ -222,12 +226,25 @@ class SecurityCamService : Service(), LifecycleOwner {
         // and Auto-White Balance (AWB) continuously, otherwise photos come out pitch black in the background.
         val preview = Preview.Builder().build()
         preview.setSurfaceProvider { request ->
-            val surfaceTexture = SurfaceTexture(0)
-            surfaceTexture.setDefaultBufferSize(request.resolution.width, request.resolution.height)
-            val surface = Surface(surfaceTexture)
-            request.provideSurface(surface, ContextCompat.getMainExecutor(this)) {
-                surface.release()
-                surfaceTexture.release()
+            // Use an ImageReader as a dummy surface to actively consume buffers.
+            // This prevents the camera HAL from stalling due to a full BufferQueue.
+            val imageReader = android.media.ImageReader.newInstance(
+                request.resolution.width,
+                request.resolution.height,
+                android.graphics.ImageFormat.YUV_420_888,
+                3
+            )
+            imageReader.setOnImageAvailableListener({ reader ->
+                try {
+                    val image = reader.acquireLatestImage()
+                    image?.close()
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }, android.os.Handler(android.os.Looper.getMainLooper()))
+            
+            request.provideSurface(imageReader.surface, ContextCompat.getMainExecutor(this)) {
+                imageReader.close()
             }
         }
         useCases.add(preview)
@@ -243,22 +260,46 @@ class SecurityCamService : Service(), LifecycleOwner {
                 takePhoto() 
             }
             imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer)
+            if (!extensionActive) {
+                useCases.add(imageAnalysis)
+            }
         } else {
-            // Dummy analyzer to keep the camera stream active for AE/AWB
-            imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { image -> 
-                image.close() 
+            if (!extensionActive) {
+                // Dummy analyzer to keep the camera stream active for AE/AWB and consume buffers
+                imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { image -> 
+                    image.close() 
+                }
+                useCases.add(imageAnalysis)
             }
         }
-        useCases.add(imageAnalysis)
 
         try {
             provider.bindToLifecycle(this, cameraSelector, *useCases.toTypedArray())
             
             if (isContinuous) {
                 startContinuousCapture(intervalSeconds)
+            } else if (extensionActive && !isContinuous) {
+                // We requested motion detection but couldn't bind ImageAnalysis due to extensions.
+                throw IllegalArgumentException("Motion detection requires ImageAnalysis, but extensions are active.")
             }
         } catch (e: Exception) {
-            Log.e("SecurityCam", "Use case binding failed", e)
+            Log.e("SecurityCam", "Use case binding failed with extensions, falling back to standard mode", e)
+            provider.unbindAll()
+            
+            // Fallback: No extensions, include ImageAnalysis so everything works functionally
+            cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            if (!useCases.contains(imageAnalysis)) {
+                useCases.add(imageAnalysis)
+            }
+            
+            try {
+                provider.bindToLifecycle(this, cameraSelector, *useCases.toTypedArray())
+                if (isContinuous) {
+                    startContinuousCapture(intervalSeconds)
+                }
+            } catch (fallbackEx: Exception) {
+                Log.e("SecurityCam", "Fallback binding also failed", fallbackEx)
+            }
         }
     }
     
