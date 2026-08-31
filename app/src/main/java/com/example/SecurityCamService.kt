@@ -192,8 +192,6 @@ class SecurityCamService : Service(), LifecycleOwner {
         imageCapture = imageCaptureBuilder.build()
 
         var cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-        var extensionActive = false
-        
         if (isEnhancedMode || isHdrMode) {
             val extensionsManager = suspendCoroutine<ExtensionsManager> { continuation ->
                 val future = ExtensionsManager.getInstanceAsync(this@SecurityCamService, provider)
@@ -208,15 +206,8 @@ class SecurityCamService : Service(), LifecycleOwner {
             
             if (isHdrMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
                 cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.HDR)
-                extensionActive = true
-            } else if (isEnhancedMode) {
-                if (extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.NIGHT)) {
-                    cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.NIGHT)
-                    extensionActive = true
-                } else if (extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.AUTO)) {
-                    cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.AUTO)
-                    extensionActive = true
-                }
+            } else if (isEnhancedMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.AUTO)) {
+                cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.AUTO)
             }
         }
 
@@ -260,46 +251,22 @@ class SecurityCamService : Service(), LifecycleOwner {
                 takePhoto() 
             }
             imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer)
-            if (!extensionActive) {
-                useCases.add(imageAnalysis)
-            }
         } else {
-            if (!extensionActive) {
-                // Dummy analyzer to keep the camera stream active for AE/AWB and consume buffers
-                imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { image -> 
-                    image.close() 
-                }
-                useCases.add(imageAnalysis)
+            // Dummy analyzer to keep the camera stream active for AE/AWB and consume buffers
+            imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { image -> 
+                image.close() 
             }
         }
+        useCases.add(imageAnalysis)
 
         try {
             provider.bindToLifecycle(this, cameraSelector, *useCases.toTypedArray())
             
             if (isContinuous) {
                 startContinuousCapture(intervalSeconds)
-            } else if (extensionActive && !isContinuous) {
-                // We requested motion detection but couldn't bind ImageAnalysis due to extensions.
-                throw IllegalArgumentException("Motion detection requires ImageAnalysis, but extensions are active.")
             }
         } catch (e: Exception) {
-            Log.e("SecurityCam", "Use case binding failed with extensions, falling back to standard mode", e)
-            provider.unbindAll()
-            
-            // Fallback: No extensions, include ImageAnalysis so everything works functionally
-            cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-            if (!useCases.contains(imageAnalysis)) {
-                useCases.add(imageAnalysis)
-            }
-            
-            try {
-                provider.bindToLifecycle(this, cameraSelector, *useCases.toTypedArray())
-                if (isContinuous) {
-                    startContinuousCapture(intervalSeconds)
-                }
-            } catch (fallbackEx: Exception) {
-                Log.e("SecurityCam", "Fallback binding also failed", fallbackEx)
-            }
+            Log.e("SecurityCam", "Use case binding failed", e)
         }
     }
     
