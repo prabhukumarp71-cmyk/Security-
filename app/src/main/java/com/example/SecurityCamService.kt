@@ -60,6 +60,8 @@ class SecurityCamService : Service(), LifecycleOwner {
         const val NOTIFICATION_ID = 1
         val isRunning = MutableStateFlow(false)
         val captureCount = MutableStateFlow(0)
+        val lastDetectionStatus = MutableStateFlow("Idle")
+        val isFarModeActive = MutableStateFlow(false)
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -126,9 +128,11 @@ class SecurityCamService : Service(), LifecycleOwner {
         val mainIntent = Intent(this, MainActivity::class.java)
         val mainPendingIntent = PendingIntent.getActivity(this, 0, mainIntent, PendingIntent.FLAG_IMMUTABLE)
 
+        val modeSuffix = if (isFarModeActive.value) " [Far-Only]" else ""
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Security Camera Active")
-            .setContentText("Captures: ${captureCount.value}")
+            .setContentTitle("Security Camera Active$modeSuffix")
+            .setContentText("Captures: ${captureCount.value} • ${lastDetectionStatus.value}")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentIntent(mainPendingIntent)
             .addAction(0, "Stop", stopPendingIntent)
@@ -176,6 +180,12 @@ class SecurityCamService : Service(), LifecycleOwner {
         val isEnhancedMode = settingsRepo.isEnhancedMode.first()
         val isHdrMode = settingsRepo.isHdrMode.first()
         val aspectRatioSetting = settingsRepo.aspectRatio.first()
+        val isFarOnlyMode = settingsRepo.isFarOnlyMode.first()
+        val farFocusLock = settingsRepo.farFocusLock.first()
+        val nearExclusionThreshold = settingsRepo.nearExclusionThreshold.first()
+
+        isFarModeActive.value = isFarOnlyMode
+        lastDetectionStatus.value = if (isFarOnlyMode) "Far Filter Active (Ignoring Near)" else "Active"
 
         val targetRatio = if (aspectRatioSetting == 0) androidx.camera.core.AspectRatio.RATIO_4_3 else androidx.camera.core.AspectRatio.RATIO_16_9
         val aspectRatioStrategy = androidx.camera.core.resolutionselector.AspectRatioStrategy(targetRatio, androidx.camera.core.resolutionselector.AspectRatioStrategy.FALLBACK_RULE_AUTO)
@@ -188,6 +198,18 @@ class SecurityCamService : Service(), LifecycleOwner {
         val imageCaptureBuilder = ImageCapture.Builder()
             .setResolutionSelector(resolutionSelector)
             .setCaptureMode(if (isHdrMode || isEnhancedMode) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+
+        // If Far-Only mode is enabled with optical focus lock, lock lens to optical infinity (0.0 diopters).
+        // This optically de-focuses near objects (<1.5m) so they stay blurred, while distant targets remain razor sharp.
+        if (isFarOnlyMode && farFocusLock) {
+            try {
+                val captureExtender = Camera2Interop.Extender(imageCaptureBuilder)
+                captureExtender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                captureExtender.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
+            } catch (e: Exception) {
+                Log.w("SecurityCam", "Could not apply far focus lock to ImageCapture", e)
+            }
+        }
 
         imageCapture = imageCaptureBuilder.build()
 
@@ -215,7 +237,17 @@ class SecurityCamService : Service(), LifecycleOwner {
 
         // Add a dummy Preview surface to force the camera hardware ISP to run Auto-Exposure (AE) 
         // and Auto-White Balance (AWB) continuously, otherwise photos come out pitch black in the background.
-        val preview = Preview.Builder().build()
+        val previewBuilder = Preview.Builder()
+        if (isFarOnlyMode && farFocusLock) {
+            try {
+                val previewExtender = Camera2Interop.Extender(previewBuilder)
+                previewExtender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                previewExtender.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
+            } catch (e: Exception) {
+                Log.w("SecurityCam", "Could not apply far focus lock to Preview", e)
+            }
+        }
+        val preview = previewBuilder.build()
         preview.setSurfaceProvider { request ->
             // Use an ImageReader as a dummy surface to actively consume buffers.
             // This prevents the camera HAL from stalling due to a full BufferQueue.
@@ -243,12 +275,38 @@ class SecurityCamService : Service(), LifecycleOwner {
         val analysisBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER)).build())
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+
+        if (isFarOnlyMode && farFocusLock) {
+            try {
+                val analysisExtender = Camera2Interop.Extender(analysisBuilder)
+                analysisExtender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                analysisExtender.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
+            } catch (e: Exception) {
+                Log.w("SecurityCam", "Could not apply far focus lock to ImageAnalysis", e)
+            }
+        }
             
         val imageAnalysis = analysisBuilder.build()
 
         if (!isContinuous) {
-            val analyzer = MotionAnalyzer(motionThreshold) { 
-                takePhoto() 
+            val analyzer = MotionAnalyzer(
+                threshold = motionThreshold,
+                isFarOnlyMode = isFarOnlyMode,
+                nearExclusionThreshold = nearExclusionThreshold
+            ) { isMotionDetected, isFar, coverage -> 
+                if (isMotionDetected) {
+                    val formattedCoverage = String.format(Locale.US, "%.1f", coverage)
+                    val status = if (isFar) {
+                        "Far target captured (${formattedCoverage}%)"
+                    } else {
+                        "Motion captured (${formattedCoverage}%)"
+                    }
+                    lastDetectionStatus.value = status
+                    takePhoto()
+                } else if (!isFar && coverage >= nearExclusionThreshold) {
+                    val formattedCoverage = String.format(Locale.US, "%.1f", coverage)
+                    lastDetectionStatus.value = "Ignored near obstacle (${formattedCoverage}%)"
+                }
             }
             imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer)
         } else {

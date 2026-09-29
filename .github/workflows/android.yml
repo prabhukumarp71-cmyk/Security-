@@ -27,8 +27,8 @@ jobs:
       with:
         cache-disabled: true
 
-    - name: Generate Debug Keystore
-      run: keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
+    - name: Decode Debug Keystore
+      run: base64 -d debug.keystore.base64 > debug.keystore
 
     - name: Build with Gradle
       run: ./gradlew assembleDebug

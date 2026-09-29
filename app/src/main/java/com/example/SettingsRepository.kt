@@ -20,6 +20,10 @@ class SettingsRepository(private val context: Context) {
         val IS_ENHANCED_MODE = booleanPreferencesKey("is_enhanced_mode")
         val IS_HDR_MODE = booleanPreferencesKey("is_hdr_mode")
         val ASPECT_RATIO = intPreferencesKey("aspect_ratio")
+        val IS_FAR_ONLY_MODE = booleanPreferencesKey("is_far_only_mode")
+        val FAR_FOCUS_LOCK = booleanPreferencesKey("far_focus_lock")
+        val NEAR_EXCLUSION_THRESHOLD = intPreferencesKey("near_exclusion_threshold")
+        val FAR_SENSITIVITY = intPreferencesKey("far_sensitivity")
     }
 
     val isContinuousMode: Flow<Boolean> = context.dataStore.data.map { it[MODE] ?: true }
@@ -30,6 +34,10 @@ class SettingsRepository(private val context: Context) {
     val isEnhancedMode: Flow<Boolean> = context.dataStore.data.map { it[IS_ENHANCED_MODE] ?: true }
     val isHdrMode: Flow<Boolean> = context.dataStore.data.map { it[IS_HDR_MODE] ?: true }
     val aspectRatio: Flow<Int> = context.dataStore.data.map { it[ASPECT_RATIO] ?: 0 } // 0 for 4:3, 1 for 16:9
+    val isFarOnlyMode: Flow<Boolean> = context.dataStore.data.map { it[IS_FAR_ONLY_MODE] ?: false }
+    val farFocusLock: Flow<Boolean> = context.dataStore.data.map { it[FAR_FOCUS_LOCK] ?: true }
+    val nearExclusionThreshold: Flow<Int> = context.dataStore.data.map { it[NEAR_EXCLUSION_THRESHOLD] ?: 25 }
+    val farSensitivity: Flow<Int> = context.dataStore.data.map { it[FAR_SENSITIVITY] ?: 15 }
 
     suspend fun setMode(isContinuous: Boolean) {
         context.dataStore.edit { it[MODE] = isContinuous }
@@ -61,5 +69,21 @@ class SettingsRepository(private val context: Context) {
     
     suspend fun setAspectRatio(ratio: Int) {
         context.dataStore.edit { it[ASPECT_RATIO] = ratio }
+    }
+
+    suspend fun setFarOnlyMode(enabled: Boolean) {
+        context.dataStore.edit { it[IS_FAR_ONLY_MODE] = enabled }
+    }
+
+    suspend fun setFarFocusLock(enabled: Boolean) {
+        context.dataStore.edit { it[FAR_FOCUS_LOCK] = enabled }
+    }
+
+    suspend fun setNearExclusionThreshold(threshold: Int) {
+        context.dataStore.edit { it[NEAR_EXCLUSION_THRESHOLD] = threshold }
+    }
+
+    suspend fun setFarSensitivity(sensitivity: Int) {
+        context.dataStore.edit { it[FAR_SENSITIVITY] = sensitivity }
     }
 }

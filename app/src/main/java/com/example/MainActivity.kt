@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +31,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.camera.view.PreviewView
 import androidx.camera.core.Preview
 import androidx.camera.core.CameraSelector
+import androidx.camera.camera2.interop.Camera2Interop
+import android.hardware.camera2.CaptureRequest
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import com.example.ui.theme.MyApplicationTheme
@@ -72,9 +76,13 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
     val isEnhancedMode by settingsRepo.isEnhancedMode.collectAsStateWithLifecycle(initialValue = true)
     val isHdrMode by settingsRepo.isHdrMode.collectAsStateWithLifecycle(initialValue = true)
     val aspectRatio by settingsRepo.aspectRatio.collectAsStateWithLifecycle(initialValue = 0)
+    val isFarOnlyMode by settingsRepo.isFarOnlyMode.collectAsStateWithLifecycle(initialValue = false)
+    val farFocusLock by settingsRepo.farFocusLock.collectAsStateWithLifecycle(initialValue = true)
+    val nearExclusionThreshold by settingsRepo.nearExclusionThreshold.collectAsStateWithLifecycle(initialValue = 25)
     
     val isRunning by SecurityCamService.isRunning.collectAsStateWithLifecycle()
     val captureCount by SecurityCamService.captureCount.collectAsStateWithLifecycle()
+    val lastDetectionStatus by SecurityCamService.lastDetectionStatus.collectAsStateWithLifecycle()
     
     var showPreview by remember { mutableStateOf(false) }
 
@@ -82,6 +90,13 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
         if (!permissionState.allPermissionsGranted) {
             permissionState.launchMultiplePermissionRequest()
         }
+    }
+
+    var currentScreen by remember { mutableStateOf("home") }
+
+    if (currentScreen == "gallery") {
+        GalleryScreen(onBack = { currentScreen = "home" })
+        return
     }
 
     Scaffold(
@@ -93,17 +108,7 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ),
                 actions = {
-                    IconButton(onClick = {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                type = "image/*"
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            context.startActivity(Intent.createChooser(intent, "View Photos"))
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }) {
+                    IconButton(onClick = { currentScreen = "gallery" }) {
                         Icon(Icons.Default.PhotoLibrary, contentDescription = "Gallery")
                     }
                 }
@@ -196,6 +201,132 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                     if (isRunning) {
                         Spacer(Modifier.height(8.dp))
                         Text("Session Captures: $captureCount", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Detection: $lastDetectionStatus", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
+            // Separate UI Option: Far-Distance Capture Feature
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isFarOnlyMode) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceVariant
+                ),
+                border = if (isFarOnlyMode) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.CenterFocusStrong,
+                                contentDescription = null,
+                                tint = if (isFarOnlyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text("Far-Distance Capture", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    if (isFarOnlyMode) "Captures far • Ignores near obstacles" else "Standard capture range",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isFarOnlyMode,
+                            onCheckedChange = { coroutineScope.launch { settingsRepo.setFarOnlyMode(it) } }
+                        )
+                    }
+
+                    if (isFarOnlyMode) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Intelligently filters out foreground disturbances (insects flying near lens, rain, leaves, hands) and only triggers on far distant activity while preserving full Motorola image processing.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Optical Far Lock (Infinity Focus)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Locks lens to infinity (0.0 diopters). Keeps near objects blurred so they don't trigger.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Switch(
+                                checked = farFocusLock,
+                                onCheckedChange = { coroutineScope.launch { settingsRepo.setFarFocusLock(it) } }
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                "Near Obstacle Exclusion Size: $nearExclusionThreshold% of frame",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "Disturbances occupying more than $nearExclusionThreshold% are classified as near obstacles and ignored.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Slider(
+                                value = nearExclusionThreshold.toFloat(),
+                                onValueChange = { coroutineScope.launch { settingsRepo.setNearExclusionThreshold(it.toInt()) } },
+                                valueRange = 10f..50f,
+                                steps = 8
+                            )
+                        }
+
+                        if (isRunning) {
+                            Surface(
+                                shape = MaterialTheme.shapes.extraSmall,
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Live Status: $lastDetectionStatus",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -314,7 +445,7 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                         .fillMaxWidth()
                         .aspectRatio(4f/3f)
                 ) {
-                    CameraPreview()
+                    CameraPreview(isFarOnlyMode = isFarOnlyMode, farFocusLock = farFocusLock)
                 }
             }
             
@@ -324,7 +455,7 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
 }
 
 @Composable
-fun CameraPreview() {
+fun CameraPreview(isFarOnlyMode: Boolean = false, farFocusLock: Boolean = false) {
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
@@ -335,7 +466,19 @@ fun CameraPreview() {
 
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
-                val preview = Preview.Builder().build().also {
+                val previewBuilder = Preview.Builder()
+
+                if (isFarOnlyMode && farFocusLock) {
+                    try {
+                        val previewExtender = Camera2Interop.Extender(previewBuilder)
+                        previewExtender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                        previewExtender.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                val preview = previewBuilder.build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
                 
