@@ -79,8 +79,10 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
     val isFarOnlyMode by settingsRepo.isFarOnlyMode.collectAsStateWithLifecycle(initialValue = false)
     val farFocusLock by settingsRepo.farFocusLock.collectAsStateWithLifecycle(initialValue = true)
     val nearExclusionThreshold by settingsRepo.nearExclusionThreshold.collectAsStateWithLifecycle(initialValue = 25)
-    val sharpnessReduction by settingsRepo.sharpnessReduction.collectAsStateWithLifecycle(initialValue = true)
-    val sharpnessLevel by settingsRepo.sharpnessLevel.collectAsStateWithLifecycle(initialValue = 0)
+    val motoDetailBoost by settingsRepo.motoDetailBoost.collectAsStateWithLifecycle(initialValue = true)
+    val sharpnessLevel by settingsRepo.sharpnessLevel.collectAsStateWithLifecycle(initialValue = 2)
+    val softwareTextureBoost by settingsRepo.softwareTextureBoost.collectAsStateWithLifecycle(initialValue = true)
+    val detailStrength by settingsRepo.detailStrength.collectAsStateWithLifecycle(initialValue = 60)
     
     val isRunning by SecurityCamService.isRunning.collectAsStateWithLifecycle()
     val captureCount by SecurityCamService.captureCount.collectAsStateWithLifecycle()
@@ -410,15 +412,16 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                 )
             }
 
-            // Sharpness & Edge Quality (Moto Fix)
+            // Moto Sharpness & Detail Boost (Matches & Exceeds Moto Camera App)
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = if (sharpnessReduction) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                )
+                    containerColor = if (motoDetailBoost) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant
+                ),
+                border = if (motoDetailBoost) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -426,34 +429,35 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Fix Over-Sharpening", style = MaterialTheme.typography.titleMedium)
+                            Text("Moto Detail & Sharpness Boost", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                if (sharpnessReduction) "Smooth natural look (halos & harsh edge noise removed)" else "Default Moto ISP sharpening (harsh edges)",
+                                if (motoDetailBoost) "Matches Moto Camera app: maximum edge sharpness, detail extraction & 100% JPEG" else "Standard camera sharpness",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Switch(
-                            checked = sharpnessReduction,
-                            onCheckedChange = { coroutineScope.launch { settingsRepo.setSharpnessReduction(it) } }
+                            checked = motoDetailBoost,
+                            onCheckedChange = { coroutineScope.launch { settingsRepo.setMotoDetailBoost(it) } }
                         )
                     }
 
-                    if (sharpnessReduction) {
+                    if (motoDetailBoost) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                         Text(
-                            "Edge Sharpness Profile",
+                            "Hardware Sharpness Profile",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 4.dp)
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             FilterChip(
                                 selected = sharpnessLevel == 0,
                                 onClick = { coroutineScope.launch { settingsRepo.setSharpnessLevel(0) } },
-                                label = { Text("Natural / Soft") },
+                                label = { Text("Soft") },
                                 modifier = Modifier.weight(1f)
                             )
                             FilterChip(
@@ -465,9 +469,53 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                             FilterChip(
                                 selected = sharpnessLevel == 2,
                                 onClick = { coroutineScope.launch { settingsRepo.setSharpnessLevel(2) } },
-                                label = { Text("Crisp") },
-                                modifier = Modifier.weight(1f)
+                                label = { Text("Ultra Sharp") },
+                                modifier = Modifier.weight(1.3f)
                             )
+                            FilterChip(
+                                selected = sharpnessLevel == 3,
+                                onClick = { coroutineScope.launch { settingsRepo.setSharpnessLevel(3) } },
+                                label = { Text("Extreme") },
+                                modifier = Modifier.weight(1.1f)
+                            )
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+
+                        // Micro-Texture & Unsharp Mask Detail Enhancer
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Micro-Detail & Texture Boost", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Applies high-frequency unsharp mask sharpening on distant text, faces, and foliage.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = softwareTextureBoost,
+                                onCheckedChange = { coroutineScope.launch { settingsRepo.setSoftwareTextureBoost(it) } }
+                            )
+                        }
+
+                        if (softwareTextureBoost) {
+                            Column {
+                                Text(
+                                    "Detail Enhancement Intensity: $detailStrength%",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Slider(
+                                    value = detailStrength.toFloat(),
+                                    onValueChange = { coroutineScope.launch { settingsRepo.setDetailStrength(it.toInt()) } },
+                                    valueRange = 20f..100f,
+                                    steps = 8
+                                )
+                            }
                         }
                     }
                 }
@@ -513,7 +561,7 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                     CameraPreview(
                         isFarOnlyMode = isFarOnlyMode,
                         farFocusLock = farFocusLock,
-                        sharpnessReduction = sharpnessReduction,
+                        motoDetailBoost = motoDetailBoost,
                         sharpnessLevel = sharpnessLevel
                     )
                 }
@@ -528,8 +576,8 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
 fun CameraPreview(
     isFarOnlyMode: Boolean = false,
     farFocusLock: Boolean = false,
-    sharpnessReduction: Boolean = true,
-    sharpnessLevel: Int = 0
+    motoDetailBoost: Boolean = true,
+    sharpnessLevel: Int = 2
 ) {
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -544,15 +592,15 @@ fun CameraPreview(
                 val previewBuilder = Preview.Builder()
                 val previewExtender = Camera2Interop.Extender(previewBuilder)
 
-                if (sharpnessReduction && sharpnessLevel == 0) {
+                if (motoDetailBoost) {
                     try {
-                        previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                } else if (sharpnessReduction && sharpnessLevel == 1) {
-                    try {
-                        previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+                        if (sharpnessLevel >= 2) {
+                            previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+                        } else if (sharpnessLevel == 1) {
+                            previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+                        } else {
+                            previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+                        }
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }

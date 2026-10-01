@@ -183,7 +183,7 @@ class SecurityCamService : Service(), LifecycleOwner {
         val isFarOnlyMode = settingsRepo.isFarOnlyMode.first()
         val farFocusLock = settingsRepo.farFocusLock.first()
         val nearExclusionThreshold = settingsRepo.nearExclusionThreshold.first()
-        val sharpnessReduction = settingsRepo.sharpnessReduction.first()
+        val motoDetailBoost = settingsRepo.motoDetailBoost.first()
         val sharpnessLevel = settingsRepo.sharpnessLevel.first()
 
         isFarModeActive.value = isFarOnlyMode
@@ -197,38 +197,39 @@ class SecurityCamService : Service(), LifecycleOwner {
             .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
             .build()
 
-        // When Natural/Soft sharpness mode is selected, avoid CAPTURE_MODE_MAXIMIZE_QUALITY 
-        // to bypass Motorola's harsh ISP unsharp-mask pass while keeping full sensor resolution.
-        val captureMode = if (sharpnessReduction && sharpnessLevel == 0) {
-            ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
-        } else if (isHdrMode || isEnhancedMode) {
-            ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
-        } else {
-            ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
-        }
-
         val imageCaptureBuilder = ImageCapture.Builder()
             .setResolutionSelector(resolutionSelector)
-            .setCaptureMode(captureMode)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+            .setJpegQuality(100)
 
         val captureExtender = Camera2Interop.Extender(imageCaptureBuilder)
 
-        // Fix Motorola over-sharpening:
-        // Set EDGE_MODE to OFF or FAST to prevent harsh white ringing, halos, and crunchy edge noise.
-        if (sharpnessReduction) {
+        // Hardware ISP Sharpness & Detail Configuration to match / exceed the Moto Camera app:
+        if (motoDetailBoost) {
             when (sharpnessLevel) {
-                0 -> {
-                    // Turn off edge enhancement completely for natural, smooth, photographic images
+                0 -> { // Soft / Natural
                     captureExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
                     captureExtender.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
                 }
-                1 -> {
-                    // Fast/mild edge mode
+                1 -> { // Balanced
                     captureExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
-                    captureExtender.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
                 }
-                else -> {
+                2 -> { // Ultra Sharp (Moto Stock Camera) - Default!
                     captureExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE, CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.SHADING_MODE, CaptureRequest.SHADING_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.DISTORTION_CORRECTION_MODE, CaptureRequest.DISTORTION_CORRECTION_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.HOT_PIXEL_MODE, CaptureRequest.HOT_PIXEL_MODE_HIGH_QUALITY)
+                }
+                3 -> { // Extreme Crisp
+                    captureExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE, CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.SHADING_MODE, CaptureRequest.SHADING_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.DISTORTION_CORRECTION_MODE, CaptureRequest.DISTORTION_CORRECTION_MODE_HIGH_QUALITY)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
                 }
             }
         }
@@ -259,8 +260,7 @@ class SecurityCamService : Service(), LifecycleOwner {
                 }, ContextCompat.getMainExecutor(this@SecurityCamService))
             }
             
-            // If Natural/Soft sharpness mode is active, avoid ExtensionMode.HDR which forces excessive edge enhancement
-            if (isHdrMode && (!sharpnessReduction || sharpnessLevel > 0) && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
+            if (isHdrMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
                 cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.HDR)
             } else if (isEnhancedMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.AUTO)) {
                 cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.AUTO)
@@ -273,10 +273,12 @@ class SecurityCamService : Service(), LifecycleOwner {
         // and Auto-White Balance (AWB) continuously, otherwise photos come out pitch black in the background.
         val previewBuilder = Preview.Builder()
         val previewExtender = Camera2Interop.Extender(previewBuilder)
-        if (sharpnessReduction && sharpnessLevel == 0) {
-            previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
-        } else if (sharpnessReduction && sharpnessLevel == 1) {
-            previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+        if (motoDetailBoost && sharpnessLevel >= 2) {
+            try {
+                previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+            } catch (e: Exception) {
+                Log.w("SecurityCam", "Could not apply preview edge mode", e)
+            }
         }
         if (isFarOnlyMode && farFocusLock) {
             try {
@@ -412,6 +414,22 @@ class SecurityCamService : Service(), LifecycleOwner {
                     captureCount.value++
                     lastCaptureTime = System.currentTimeMillis()
                     
+                    val savedUri = outputFileResults.savedUri
+                    if (savedUri != null) {
+                        CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                val textureBoost = settingsRepo.softwareTextureBoost.first()
+                                val strengthPercent = settingsRepo.detailStrength.first()
+                                if (textureBoost && strengthPercent > 0) {
+                                    val strength = strengthPercent / 100f
+                                    ImageEnhancer.applyDetailEnhancement(applicationContext, savedUri, strength)
+                                }
+                            } catch (e: Exception) {
+                                Log.e("SecurityCam", "Detail boost failed", e)
+                            }
+                        }
+                    }
+
                     val manager = getSystemService(NotificationManager::class.java)
                     val isNotificationActive = manager.activeNotifications.any { it.id == NOTIFICATION_ID }
                     if (isNotificationActive) {

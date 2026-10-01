@@ -24,8 +24,10 @@ class SettingsRepository(private val context: Context) {
         val FAR_FOCUS_LOCK = booleanPreferencesKey("far_focus_lock")
         val NEAR_EXCLUSION_THRESHOLD = intPreferencesKey("near_exclusion_threshold")
         val FAR_SENSITIVITY = intPreferencesKey("far_sensitivity")
-        val SHARPNESS_REDUCTION = booleanPreferencesKey("sharpness_reduction")
+        val MOTO_DETAIL_BOOST = booleanPreferencesKey("moto_detail_boost")
         val SHARPNESS_LEVEL = intPreferencesKey("sharpness_level")
+        val SOFTWARE_TEXTURE_BOOST = booleanPreferencesKey("software_texture_boost")
+        val DETAIL_STRENGTH = intPreferencesKey("detail_strength")
     }
 
     val isContinuousMode: Flow<Boolean> = context.dataStore.data.map { it[MODE] ?: true }
@@ -40,8 +42,10 @@ class SettingsRepository(private val context: Context) {
     val farFocusLock: Flow<Boolean> = context.dataStore.data.map { it[FAR_FOCUS_LOCK] ?: true }
     val nearExclusionThreshold: Flow<Int> = context.dataStore.data.map { it[NEAR_EXCLUSION_THRESHOLD] ?: 25 }
     val farSensitivity: Flow<Int> = context.dataStore.data.map { it[FAR_SENSITIVITY] ?: 15 }
-    val sharpnessReduction: Flow<Boolean> = context.dataStore.data.map { it[SHARPNESS_REDUCTION] ?: true }
-    val sharpnessLevel: Flow<Int> = context.dataStore.data.map { it[SHARPNESS_LEVEL] ?: 0 } // 0: Natural/Soft, 1: Balanced, 2: Crisp
+    val motoDetailBoost: Flow<Boolean> = context.dataStore.data.map { it[MOTO_DETAIL_BOOST] ?: true }
+    val sharpnessLevel: Flow<Int> = context.dataStore.data.map { it[SHARPNESS_LEVEL] ?: 2 } // 0: Soft, 1: Balanced, 2: Ultra Sharp (Moto), 3: Extreme
+    val softwareTextureBoost: Flow<Boolean> = context.dataStore.data.map { it[SOFTWARE_TEXTURE_BOOST] ?: true }
+    val detailStrength: Flow<Int> = context.dataStore.data.map { it[DETAIL_STRENGTH] ?: 60 } // 60% strength (0.6f)
 
     suspend fun setMode(isContinuous: Boolean) {
         context.dataStore.edit { it[MODE] = isContinuous }
@@ -91,11 +95,19 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[FAR_SENSITIVITY] = sensitivity }
     }
 
-    suspend fun setSharpnessReduction(enabled: Boolean) {
-        context.dataStore.edit { it[SHARPNESS_REDUCTION] = enabled }
+    suspend fun setMotoDetailBoost(enabled: Boolean) {
+        context.dataStore.edit { it[MOTO_DETAIL_BOOST] = enabled }
     }
 
     suspend fun setSharpnessLevel(level: Int) {
         context.dataStore.edit { it[SHARPNESS_LEVEL] = level }
+    }
+
+    suspend fun setSoftwareTextureBoost(enabled: Boolean) {
+        context.dataStore.edit { it[SOFTWARE_TEXTURE_BOOST] = enabled }
+    }
+
+    suspend fun setDetailStrength(strength: Int) {
+        context.dataStore.edit { it[DETAIL_STRENGTH] = strength }
     }
 }
