@@ -79,6 +79,8 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
     val isFarOnlyMode by settingsRepo.isFarOnlyMode.collectAsStateWithLifecycle(initialValue = false)
     val farFocusLock by settingsRepo.farFocusLock.collectAsStateWithLifecycle(initialValue = true)
     val nearExclusionThreshold by settingsRepo.nearExclusionThreshold.collectAsStateWithLifecycle(initialValue = 25)
+    val sharpnessReduction by settingsRepo.sharpnessReduction.collectAsStateWithLifecycle(initialValue = true)
+    val sharpnessLevel by settingsRepo.sharpnessLevel.collectAsStateWithLifecycle(initialValue = 0)
     
     val isRunning by SecurityCamService.isRunning.collectAsStateWithLifecycle()
     val captureCount by SecurityCamService.captureCount.collectAsStateWithLifecycle()
@@ -408,6 +410,69 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                 )
             }
 
+            // Sharpness & Edge Quality (Moto Fix)
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (sharpnessReduction) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Fix Over-Sharpening", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                if (sharpnessReduction) "Smooth natural look (halos & harsh edge noise removed)" else "Default Moto ISP sharpening (harsh edges)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = sharpnessReduction,
+                            onCheckedChange = { coroutineScope.launch { settingsRepo.setSharpnessReduction(it) } }
+                        )
+                    }
+
+                    if (sharpnessReduction) {
+                        Text(
+                            "Edge Sharpness Profile",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = sharpnessLevel == 0,
+                                onClick = { coroutineScope.launch { settingsRepo.setSharpnessLevel(0) } },
+                                label = { Text("Natural / Soft") },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = sharpnessLevel == 1,
+                                onClick = { coroutineScope.launch { settingsRepo.setSharpnessLevel(1) } },
+                                label = { Text("Balanced") },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = sharpnessLevel == 2,
+                                onClick = { coroutineScope.launch { settingsRepo.setSharpnessLevel(2) } },
+                                label = { Text("Crisp") },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text("Aspect Ratio", style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.height(8.dp))
@@ -445,7 +510,12 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
                         .fillMaxWidth()
                         .aspectRatio(4f/3f)
                 ) {
-                    CameraPreview(isFarOnlyMode = isFarOnlyMode, farFocusLock = farFocusLock)
+                    CameraPreview(
+                        isFarOnlyMode = isFarOnlyMode,
+                        farFocusLock = farFocusLock,
+                        sharpnessReduction = sharpnessReduction,
+                        sharpnessLevel = sharpnessLevel
+                    )
                 }
             }
             
@@ -455,7 +525,12 @@ fun SecurityCamApp(settingsRepo: SettingsRepository) {
 }
 
 @Composable
-fun CameraPreview(isFarOnlyMode: Boolean = false, farFocusLock: Boolean = false) {
+fun CameraPreview(
+    isFarOnlyMode: Boolean = false,
+    farFocusLock: Boolean = false,
+    sharpnessReduction: Boolean = true,
+    sharpnessLevel: Int = 0
+) {
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
@@ -467,10 +542,24 @@ fun CameraPreview(isFarOnlyMode: Boolean = false, farFocusLock: Boolean = false)
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
                 val previewBuilder = Preview.Builder()
+                val previewExtender = Camera2Interop.Extender(previewBuilder)
+
+                if (sharpnessReduction && sharpnessLevel == 0) {
+                    try {
+                        previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                } else if (sharpnessReduction && sharpnessLevel == 1) {
+                    try {
+                        previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
 
                 if (isFarOnlyMode && farFocusLock) {
                     try {
-                        val previewExtender = Camera2Interop.Extender(previewBuilder)
                         previewExtender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                         previewExtender.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
                     } catch (e: Exception) {

@@ -24,6 +24,8 @@ class SettingsRepository(private val context: Context) {
         val FAR_FOCUS_LOCK = booleanPreferencesKey("far_focus_lock")
         val NEAR_EXCLUSION_THRESHOLD = intPreferencesKey("near_exclusion_threshold")
         val FAR_SENSITIVITY = intPreferencesKey("far_sensitivity")
+        val SHARPNESS_REDUCTION = booleanPreferencesKey("sharpness_reduction")
+        val SHARPNESS_LEVEL = intPreferencesKey("sharpness_level")
     }
 
     val isContinuousMode: Flow<Boolean> = context.dataStore.data.map { it[MODE] ?: true }
@@ -38,6 +40,8 @@ class SettingsRepository(private val context: Context) {
     val farFocusLock: Flow<Boolean> = context.dataStore.data.map { it[FAR_FOCUS_LOCK] ?: true }
     val nearExclusionThreshold: Flow<Int> = context.dataStore.data.map { it[NEAR_EXCLUSION_THRESHOLD] ?: 25 }
     val farSensitivity: Flow<Int> = context.dataStore.data.map { it[FAR_SENSITIVITY] ?: 15 }
+    val sharpnessReduction: Flow<Boolean> = context.dataStore.data.map { it[SHARPNESS_REDUCTION] ?: true }
+    val sharpnessLevel: Flow<Int> = context.dataStore.data.map { it[SHARPNESS_LEVEL] ?: 0 } // 0: Natural/Soft, 1: Balanced, 2: Crisp
 
     suspend fun setMode(isContinuous: Boolean) {
         context.dataStore.edit { it[MODE] = isContinuous }
@@ -85,5 +89,13 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setFarSensitivity(sensitivity: Int) {
         context.dataStore.edit { it[FAR_SENSITIVITY] = sensitivity }
+    }
+
+    suspend fun setSharpnessReduction(enabled: Boolean) {
+        context.dataStore.edit { it[SHARPNESS_REDUCTION] = enabled }
+    }
+
+    suspend fun setSharpnessLevel(level: Int) {
+        context.dataStore.edit { it[SHARPNESS_LEVEL] = level }
     }
 }

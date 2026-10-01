@@ -183,6 +183,8 @@ class SecurityCamService : Service(), LifecycleOwner {
         val isFarOnlyMode = settingsRepo.isFarOnlyMode.first()
         val farFocusLock = settingsRepo.farFocusLock.first()
         val nearExclusionThreshold = settingsRepo.nearExclusionThreshold.first()
+        val sharpnessReduction = settingsRepo.sharpnessReduction.first()
+        val sharpnessLevel = settingsRepo.sharpnessLevel.first()
 
         isFarModeActive.value = isFarOnlyMode
         lastDetectionStatus.value = if (isFarOnlyMode) "Far Filter Active (Ignoring Near)" else "Active"
@@ -195,15 +197,46 @@ class SecurityCamService : Service(), LifecycleOwner {
             .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
             .build()
 
+        // When Natural/Soft sharpness mode is selected, avoid CAPTURE_MODE_MAXIMIZE_QUALITY 
+        // to bypass Motorola's harsh ISP unsharp-mask pass while keeping full sensor resolution.
+        val captureMode = if (sharpnessReduction && sharpnessLevel == 0) {
+            ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+        } else if (isHdrMode || isEnhancedMode) {
+            ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
+        } else {
+            ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+        }
+
         val imageCaptureBuilder = ImageCapture.Builder()
             .setResolutionSelector(resolutionSelector)
-            .setCaptureMode(if (isHdrMode || isEnhancedMode) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(captureMode)
+
+        val captureExtender = Camera2Interop.Extender(imageCaptureBuilder)
+
+        // Fix Motorola over-sharpening:
+        // Set EDGE_MODE to OFF or FAST to prevent harsh white ringing, halos, and crunchy edge noise.
+        if (sharpnessReduction) {
+            when (sharpnessLevel) {
+                0 -> {
+                    // Turn off edge enhancement completely for natural, smooth, photographic images
+                    captureExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+                }
+                1 -> {
+                    // Fast/mild edge mode
+                    captureExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+                    captureExtender.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+                }
+                else -> {
+                    captureExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+                }
+            }
+        }
 
         // If Far-Only mode is enabled with optical focus lock, lock lens to optical infinity (0.0 diopters).
         // This optically de-focuses near objects (<1.5m) so they stay blurred, while distant targets remain razor sharp.
         if (isFarOnlyMode && farFocusLock) {
             try {
-                val captureExtender = Camera2Interop.Extender(imageCaptureBuilder)
                 captureExtender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                 captureExtender.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
             } catch (e: Exception) {
@@ -226,7 +259,8 @@ class SecurityCamService : Service(), LifecycleOwner {
                 }, ContextCompat.getMainExecutor(this@SecurityCamService))
             }
             
-            if (isHdrMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
+            // If Natural/Soft sharpness mode is active, avoid ExtensionMode.HDR which forces excessive edge enhancement
+            if (isHdrMode && (!sharpnessReduction || sharpnessLevel > 0) && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
                 cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.HDR)
             } else if (isEnhancedMode && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.AUTO)) {
                 cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.AUTO)
@@ -238,9 +272,14 @@ class SecurityCamService : Service(), LifecycleOwner {
         // Add a dummy Preview surface to force the camera hardware ISP to run Auto-Exposure (AE) 
         // and Auto-White Balance (AWB) continuously, otherwise photos come out pitch black in the background.
         val previewBuilder = Preview.Builder()
+        val previewExtender = Camera2Interop.Extender(previewBuilder)
+        if (sharpnessReduction && sharpnessLevel == 0) {
+            previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+        } else if (sharpnessReduction && sharpnessLevel == 1) {
+            previewExtender.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+        }
         if (isFarOnlyMode && farFocusLock) {
             try {
-                val previewExtender = Camera2Interop.Extender(previewBuilder)
                 previewExtender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                 previewExtender.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
             } catch (e: Exception) {
